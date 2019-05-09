@@ -1,12 +1,9 @@
-import sys, json, flask, flask_socketio, httplib2, uuid
-from flask import Response, request, jsonify, session
+import flask, httplib2, uuid
+from flask import request, session
 from flask_socketio import SocketIO
-from apiclient import discovery
+from googleapiclient import discovery
 from oauth2client import client
-from googleapiclient import sample_tools
-from rfc3339 import rfc3339
-from dateutil import parser
-from datetime import datetime,date,timedelta,time
+from datetime import datetime,timedelta
 import collections
 
 
@@ -46,7 +43,6 @@ def addCalendar():
         _days = request.form.get('search', None)
         session['_hours'] = _hours
         session['_days'] = _days
-        print(_hours,_days)
         return flask.redirect(flask.url_for('resultScreen'))
     print("Adding calendar")
     #If credentials do not exist, redirect to login page
@@ -74,7 +70,6 @@ def addCalendar():
         if ('.com' in x['name']):
             if x['name'] not in emailList:
                 emailList.append(x['name'])
-    print(emailList)
     #Run freeBusyQueryFunc
     bigSchedule = freeBusyQueryFunc(calendarIDs, service)
     globalSchedule.extend(bigSchedule) 
@@ -103,11 +98,8 @@ def resultScreen():
     #Add unavailableTimeList to big Schedule
     bigSchedule.extend(unavailableTime(_days))
     
-    #Call Function to sort bigSchedule
-    print("Days:",_days)
-    print(_hours)
+    #Convert hours to minutes
     _min = convertTimetoMinute(_hours)
-    print(_min)
 
     #Make final list by finding time with given minute input
     finalList = findFreeThyme(list(collections.deque(sortSchedule(bigSchedule))), _min)
@@ -133,7 +125,7 @@ def oauth2callback():
         #Load Google Cloud Client ID and Secret
         'client_secrets.json',
         #OAuth Consent Scope (Sensitive Scope)
-        scope='https://www.googleapis.com/auth/calendar email',
+        scope='https://www.googleapis.com/auth/calendar.readonly email',
         #Redirect to /login to complete request
         redirect_uri=flask.url_for('oauth2callback', _external=True))
     #Redirect if auth code is not in request
@@ -340,7 +332,7 @@ def resetCalendar():
 #Server setup
 if __name__ == '__main__':
     app.secret_key = str(uuid.uuid4())
-    print('Server starting...')
+    print('Server started')
     socketio.run(
     app,
     host='localhost',
