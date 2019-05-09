@@ -13,6 +13,7 @@ import collections
 app = flask.Flask(__name__)
 socketio = SocketIO(app)
 globalSchedule = []
+emailList = []
 
 
 #This is the beginning of the flask route
@@ -34,7 +35,8 @@ def index():
     except credError:
         print("Did not properly assign credentials")
     
-    return flask.render_template('thyme-website.html')
+    return flask.render_template('thyme-website.html', emails = emailList)
+
 
 #ADD CALENDAR BUTTON RUNS BUT STAYS ON SAME PAGE:
 @app.route("/add-calendar", methods=['GET', 'POST'])
@@ -67,21 +69,28 @@ def addCalendar():
     page_token = None
     #Create a list of Calendar ID's
     calendarIDs = getCalendarIDs(service, page_token)
+    #Append calendarIDs in emailString
+    for x in calendarIDs:
+        if ('.com' in x['name']):
+            if x['name'] not in emailList:
+                emailList.append(x['name'])
+    print(emailList)
     #Run freeBusyQueryFunc
     bigSchedule = freeBusyQueryFunc(calendarIDs, service)
     globalSchedule.extend(bigSchedule) 
-    return flask.render_template('thyme-website.html')   
+    return flask.render_template('thyme-website.html', emails = emailList)
         
 
 #RESET BUTTON RUNS BUT STAYS ON SAME PAGE  
 @app.route("/reset-calendar")
-def resetCalendar():   
-    print("Resetting calendar")
-    globalSchedule.clear()
-    return flask.render_template('thyme-website.html')
+def resetCalendarScreen():   
+    resetCalendar()
+    return flask.render_template('thyme-website.html', emails = emailList)
     
 @app.route("/thyme-results.html")
 def resultScreen():
+    if(not emailList):
+        return flask.render_template('thyme-website.html', emails = emailList, error = "No Calendars were Added") 
 
     bigSchedule = globalSchedule
     #TEMP ASSIGNMENTS
@@ -90,26 +99,22 @@ def resultScreen():
     default_search = '14'
     try: _days = int(session.get('_days', default_search))
     except: _days = 14
-
-    
-    print(_hours,_days)
-    
     
     #Add unavailableTimeList to big Schedule
     bigSchedule.extend(unavailableTime(_days))
     
     #Call Function to sort bigSchedule
+    print("Days:",_days)
+    print(_hours)
     _min = convertTimetoMinute(_hours)
+    print(_min)
+
     #Make final list by finding time with given minute input
     finalList = findFreeThyme(list(collections.deque(sortSchedule(bigSchedule))), _min)
-    '''
-    finalList.pop(0)
-    finalList.pop()
+
     finalList = webDisplayFormat(finalList)
-    '''
-    print(finalList)
-    
-    return flask.render_template('thyme-results.html')
+
+    return flask.render_template('thyme-results.html', minutes = _min, days = _days, freeThymes = finalList, emails = emailList), resetCalendar()
     
 @app.route("/thyme-website-contact.html")
 def contactPage():    
@@ -128,7 +133,7 @@ def oauth2callback():
         #Load Google Cloud Client ID and Secret
         'client_secrets.json',
         #OAuth Consent Scope (Sensitive Scope)
-        scope='https://www.googleapis.com/auth/calendar',
+        scope='https://www.googleapis.com/auth/calendar email',
         #Redirect to /login to complete request
         redirect_uri=flask.url_for('oauth2callback', _external=True))
     #Redirect if auth code is not in request
@@ -286,108 +291,51 @@ def unavailableTime(_days,_sHr=0,_sMin=00,_eHr=9,_eMin=00):
 def sortSchedule(bigSchedule):
     startTimeList = []
     endTimeList = []
-    print(bigSchedule)
     for x in bigSchedule:
         startTimeList.append(convertDateTime(x["start"]))
         endTimeList.append(convertDateTime(x["end"]))
-    print(startTimeList)
-    print(endTimeList)
     startTimeList.sort()
     endTimeList.sort()
     outputList = []
     for x in startTimeList:
         tempDict = {"start":x,"end":endTimeList[startTimeList.index(x)]}
-        print(tempDict)
         outputList.append(tempDict)
     return outputList
         
     
-
-'''
-#OLD SORT FUNCTION
-def sortSchedule(bigSchedule):
-    sortedSchedule = collections.deque([])
-    #Convert bigSchedule to sortedSchedule
-    for event in bigSchedule:
-        #If sortedSchedule deque is empty, append first element
-        if not sortedSchedule:
-            sortedSchedule.append(event)
-        #Else if startTime[0] is less than startTime of element and endTime is less than startTime of element
-        elif convertDateTime(event['end']) < convertDateTime(sortedSchedule[0]['start']):
-            #Append the event to the front of sortedSchedule
-            sortedSchedule.appendleft(event)
-        #Else if endTime[-1] (Right most element) is less than the start of of event
-        elif convertDateTime(sortedSchedule[-1]['end']) < convertDateTime(event['start']):
-            #Append the event to the back of sortedSchedule
-            sortedSchedule.append(event)
-        #Non empty deque and if element is not able to be appended to front or back
-        else:
-            for sortedEvents in sortedSchedule:
-                #If event end is less than startTime element and start is greater than endTime previous of element
-                if convertDateTime(event['end']) <= convertDateTime(sortedEvents['start']) and convertDateTime(event['start']) > convertDateTime(sortedSchedule[sortedEvents-1]['end']):
-                    #Insert element into that location
-                    sortedSchedule.insert(sortedEvents, event)
-                    break
-                #Else if event startTime is less than current sortedEvent startTime and event endTime is less than current sortedEvent endTime
-                elif convertDateTime(event['start']) < convertDateTime(sortedEvents['start']) and convertDateTime(event['end']) <= convertDateTime(sortedEvents['end']):
-                    #Replace current sortedEvent startTime with event startTime value
-                    sortedEvents['start'] = event['start']
-                    break
-                #Else if event endTime is greater than current sortedEvent endTime and event startTime is greater than current sortedEvent startTime
-                elif convertDateTime(event['end']) > convertDateTime(sortedEvents['end']) and convertDateTime(event['start']) >= convertDateTime(sortedEvents['start']):
-                    sortedEvents['end'] = event['end']
-                    #Replace current sortedEvent endTime with event endTime value
-                    break
-                #Else: event is already part of a sortedEvent
-                #event endTime is less than current sortedEvent endTime and event startTime is greater than current sortedEvent startTime
-                elif convertDateTime(event['end']) <= convertDateTime(sortedEvents['end']) and convertDateTime(event['start']) >= convertDateTime(sortedEvents['start']):
-                    break
-                else:
-                    pass
-    return sortedSchedule
-'''
-    
 def webDisplayFormat(finalList):
     revisedFinalList = []
     for freeThyme in finalList:
-        #creates a larger list to store the "freethyme events"
-
-        displayList = []
-        displayList.append(freeThyme[0])
 
         #converts numDay to wordDay
-        date1, wholeTime1 = freeThyme[1].split('T')
-        year, month, day = date1.split('-')
-        year = int(year)
-        month = int(month)
-        day = int(day)
-        stringDate = date(year,month,day).strftime("%A, %B %d, %Y   ~   ")
-        displayList.append(stringDate)
+        stringDate = freeThyme[1].strftime("%A, %B %d, %Y   ~   ")
 
         #creates startTime by parsing
-        fullTime1, timeZone = wholeTime1.split("-")
-        hours, minutes, seconds = fullTime1.split(":")
-        hours = int(hours)
-        minutes = int(minutes)
-        startTime = time(hour=hours,minute=minutes).strftime("%I:%M %p")
+        startTime = freeThyme[1].strftime("%I:%M %p")
 
         #creates entTime by parsing
-        date2, wholeTime2 = freeThyme[2].split('T')
-        fullTime2, timeZone = wholeTime2.split("-")
-        hours, minutes, seconds = fullTime2.split(":")
-        hours = int(hours)
-        minutes = int(minutes)
-        endTime = time(hour=hours,minute=minutes).strftime("%I:%M %p")
+
+        endTime = freeThyme[2].strftime("%I:%M %p")
 
         #creates time interval
         timeInterval =  startTime + " - " + endTime
 
-        #appends the time interval for list
-        displayList.append(timeInterval)
+        #Create an output string
+        outString = stringDate + timeInterval
+
 
         #adds "freethyme event" into bigger list of "freethyme events"
-        revisedFinalList.append(displayList)
+        revisedFinalList.append(outString)
+
+    #Pop first element
+    revisedFinalList.pop(0)
+
     return revisedFinalList
+
+def resetCalendar():   
+    print("Resetting calendar")
+    globalSchedule.clear()
+    emailList.clear()
 
 #Server setup
 if __name__ == '__main__':
