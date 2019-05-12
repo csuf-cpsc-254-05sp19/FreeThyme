@@ -15,8 +15,8 @@ Our project involves using the google calendar API to generate a time and date w
 
 ## Api Reference
 
-![Google Calendar API]https://developers.google.com/calendar/downloads  
-![Google OAuth]https://developers.google.com/identity/protocols/OAuth2
+[Google Calendar API](https://developers.google.com/calendar/downloads)  
+[Google OAuth](https://developers.google.com/identity/protocols/OAuth2)
 
 ## Licensing
 
