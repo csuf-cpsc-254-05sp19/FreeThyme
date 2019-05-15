@@ -1,12 +1,13 @@
-import flask, httplib2, uuid
+import flask, httplib2, uuid, collections
 from flask import request, session
 from flask_socketio import SocketIO
 from googleapiclient import discovery
 from oauth2client import client
-from datetime import datetime,timedelta
-import collections
+from support_calendar import getCalendarIDs, freeBusyQueryFunc
+from support_conversion import convertTimetoMinute, webDisplayFormat
+from support_freethyme import unavailableTime, findFreeThyme, sortSchedule
 
-
+#The instance objects that stores information while running program
 app = flask.Flask(__name__)
 socketio = SocketIO(app)
 globalSchedule = []
@@ -29,7 +30,7 @@ def index():
     try:
         credentials = client.OAuth2Credentials.from_json(flask.session['credentials'])
     #When credential error
-    except credError:
+    except:
         print("Did not properly assign credentials")
     
     return flask.render_template('thyme-website.html', emails = emailList)
@@ -56,7 +57,7 @@ def addCalendar():
     try:
         credentials = client.OAuth2Credentials.from_json(flask.session['credentials'])
     #When credential error
-    except credError:
+    except:
         print("Did not properly assign credentials")
     #Create Http authentication
     http_auth = credentials.authorize(httplib2.Http())
@@ -75,13 +76,13 @@ def addCalendar():
     globalSchedule.extend(bigSchedule) 
     return flask.render_template('thyme-website.html', emails = emailList)
         
-
 #RESET BUTTON RUNS BUT STAYS ON SAME PAGE  
 @app.route("/reset-calendar")
 def resetCalendarScreen():   
     resetCalendar()
     return flask.render_template('thyme-website.html', emails = emailList)
-    
+
+#Running when the page is redirected to the results page
 @app.route("/thyme-results.html")
 def resultScreen():
     if(not emailList):
@@ -107,15 +108,16 @@ def resultScreen():
     finalList = webDisplayFormat(finalList)
 
     return flask.render_template('thyme-results.html', minutes = _min, days = _days, freeThymes = finalList, emails = emailList), resetCalendar()
-    
+
+#When user clicks on the contact page   
 @app.route("/thyme-website-contact.html")
 def contactPage():    
     return flask.render_template('thyme-website-contact.html')
 
+#When user clicks on the about page
 @app.route("/thyme-website-about.html")
 def aboutPage():    
     return flask.render_template('thyme-website-about.html')
-
 
 #This is the beginning of the oauth callback route (/login page)
 @app.route('/oauth2callback')
@@ -141,189 +143,7 @@ def oauth2callback():
     #Redirect back to index.html
     return flask.redirect(flask.url_for('index'))
 
-#Google Calendar API to collect calendarID's
-def getCalendarIDs(service, page_token):
-    calendarIDs = []
-    while True:
-        calendar_list = service.calendarList().list(pageToken=page_token).execute()
-        for calendar_list_entry in calendar_list['items']:
-            calendarIDs.append({"name": calendar_list_entry['summary'], "id": calendar_list_entry['id']})
-        page_token = calendar_list.get('nextPageToken')
-        if not page_token:
-            break
-    return calendarIDs
-
-
-#Google Calendar API query function
-def freeBusyQueryFunc(calendarIDs, service, _days = 14, _timezone = ["America/Los_Angeles","07:00"]):
-    bigSchedule = []
-    freeBusyQuery = []
-    #Query each calendar from list of Calendar ID's
-    for x in calendarIDs:
-        calID = x.get('id')
-        PARAMS = {'timeMin': convertDateTimeToGoogle(datetime.now()),
-                  "timeMax": addTimeScan(_days),
-                  "timeZone": _timezone[0],
-                  "items":[{"id": calID}]
-                  }
-        
-        freeBusyQuery = (service.freebusy().query(body=PARAMS).execute())
-        
-        #Add all start and end times to bigSchedule
-        for elem in freeBusyQuery['calendars'][calID]['busy']:
-            bigSchedule.append(elem)
-    return bigSchedule
-
-def convertTimetoMinute(timeLength):
-    try:
-        hours, minutes = timeLength.split(":")
-        hours = int(hours)
-    except:
-        try:
-            hours = int(timeLength)
-            minutes = 0
-        except:
-            hours = 3
-            minutes = 0
-    return(hours*60 + int(minutes))
-
-#Fumction to convert tring to dateTime
-def convertDateTime(inputString):
-    #parses the first event by "T"
-    #so day1 = YEAR-MONTH-DAY, and wholetime = HOUR:MINUTES:SECONDS-TIMEZONE
-    date, wholeTime = inputString.split('T')
-    
-    year, month, day = date.split("-")
-    
-    #using the whole time we parse it by the "-" symbol meaning that
-    #time1 = HOURS:MINUTES:SECONDS, and timezone1 = TIMEZONE
-    time, timezone = wholeTime.split("-")
-    
-    #now that we have the time format as HOUR:MINUTES:SECONDS
-    #we can once again parse it to get the HOURs, MINUTEs, and SECONDs 
-    #and store them in dedicated variables 
-    #hour1 = hours, minutes1 = minutes, seconds1 = seconds, 
-    hour, minutes, seconds= time.split(":")
-    #we must convert the parsed quantities into integers so that
-    #they can be used by the "timedelta" function
-    year = int(year)
-    month = int(month)
-    day = int(day)
-    hour = int(hour)
-    minute = int(minutes)
-    second = int(seconds)
-    
-    outputDateTime = datetime(year, month, day, hour, minute, second)
-    
-    return outputDateTime
-
-def convertDateTimeToGoogle(dateTime, _timezone = ["America/Los_Angeles","07:00"]):
-    year = dateTime.year
-    month = dateTime.month
-    day = dateTime.day
-    hour = dateTime.hour
-    minute = dateTime.minute
-    second = dateTime.second
-    #Format '2019-05-01T03:00:00-07:00'
-    outputString = f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}-{_timezone[1]}"
-    
-    return str(outputString)
-
-#Function to find difference in time
-def findDiffTime(event1, event2):
-    
-    eventdelta1 = (event1["end"])
-    eventdelta2 = (event2["start"])
-
-    lengthOfFreeThyme = eventdelta2 - eventdelta1
-    return [lengthOfFreeThyme, event1["end"], event2["start"]]
-
-#Given sorted schedule and minimum appointment length find FreeThyme
-def findFreeThyme(eventList, appointmentLength):
-    #Format for input eventList, 180 (time in minutes)
-    listOfFreeThyme = []
-    timeDeltaAppointmentLength = timedelta(minutes = appointmentLength)
-    for event1,event2 in zip(eventList, eventList[1:])    :
-        freeThyme = findDiffTime(event1,event2)
-        if freeThyme[0] >= timeDeltaAppointmentLength:
-            listOfFreeThyme.append(freeThyme)
-    return listOfFreeThyme
-    
-    
-def addTimeScan(_days,_eHr = 9,_eMin = 00):
-    timeDeltaDays = timedelta(days = _days) 
-    timeScan = datetime.now() + timeDeltaDays
-    timeScan.replace(hour = _eHr)
-    timeScan.replace(minute = _eMin)
-    timeScan = convertDateTimeToGoogle(timeScan)
-    return timeScan
-    
-    
-#Function for to add unavailable time to bigSchedule given start and end time (add this daily)
-#Useful to adding bedtimes where it is not a good idea to suggest events in the middle of the night
-def unavailableTime(_days,_sHr=0,_sMin=00,_eHr=9,_eMin=00):
-    #input an int of days
-    unavailableTimeList = []
-    for x in range(_days):
-       timeDeltaDays = timedelta(days = x) 
-
-       currentDay = datetime.now()
-
-       currentDate = datetime(year = currentDay.year, month = currentDay.month, day=currentDay.day, hour=_sHr, minute=_sMin)
-       currentDate = currentDate + timeDeltaDays
-       startUn = convertDateTimeToGoogle(currentDate)
-
-       currentDate = datetime(year = currentDay.year, month = currentDay.month, day=currentDay.day, hour=_eHr, minute=_eMin)
-       currentDate = currentDate + timeDeltaDays
-       endUn = convertDateTimeToGoogle(currentDate)
-
-       unavailableTimeList.append({"start":startUn,"end":endUn})
-    return unavailableTimeList
-
-def sortSchedule(bigSchedule):
-    startTimeList = []
-    endTimeList = []
-    for x in bigSchedule:
-        startTimeList.append(convertDateTime(x["start"]))
-        endTimeList.append(convertDateTime(x["end"]))
-    startTimeList.sort()
-    endTimeList.sort()
-    outputList = []
-    for x in startTimeList:
-        tempDict = {"start":x,"end":endTimeList[startTimeList.index(x)]}
-        outputList.append(tempDict)
-    return outputList
-        
-    
-def webDisplayFormat(finalList):
-    revisedFinalList = []
-    for freeThyme in finalList:
-
-        #converts numDay to wordDay
-        stringDate = freeThyme[1].strftime("%A, %B %d, %Y   ~   ")
-
-        #creates startTime by parsing
-        startTime = freeThyme[1].strftime("%I:%M %p")
-
-        #creates entTime by parsing
-
-        endTime = freeThyme[2].strftime("%I:%M %p")
-
-        #creates time interval
-        timeInterval =  startTime + " - " + endTime
-
-        #Create an output string
-        outString = stringDate + timeInterval
-
-
-        #adds "freethyme event" into bigger list of "freethyme events"
-        revisedFinalList.append(outString)
-
-    #Pop first element
-    revisedFinalList.pop(0)
-
-    return revisedFinalList
-
+#Function resets calendar
 def resetCalendar():   
     print("Resetting calendar")
     globalSchedule.clear()
