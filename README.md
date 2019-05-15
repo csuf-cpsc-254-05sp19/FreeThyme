@@ -16,11 +16,11 @@ Python, Flask, Bootstrap
 [Google OAuth](https://developers.google.com/identity/protocols/OAuth2)
 
 ## Set Up and Installation
-Install the various requirements provided by the requirements.txt file.  
-Run the main program FreeThyme.py with Python 3.  
-ex. python3 FreeThyme.py  
-*Note: Be sure to download your client secrets from the Google Cloud Console with proper scopes.  
-When running, the program will display current actions on the terminal. The user interface can be accessed by typing the url localhost:8080 on a web browser.  
+  * Install the various requirements provided by the requirements.txt file.  
+  * Run the main program FreeThyme.py with Python 3.  
+  * ex. python3 FreeThyme.py  
+  * Note: Be sure to download your client secrets from the Google Cloud Console with proper scopes.  
+  * When running, the program will display current actions on the terminal. The user interface can be accessed by typing the url localhost:8080 on a web browser.  
 
 ## Licensing
 
